@@ -151,56 +151,78 @@ function handleRequest(request, response, grunt, options) {
  * Runs Grunt to execute the given tasks.
  */
 function executeTasks(request, response, grunt, options, tasks, output, contentType) {
-	// execute tasks
-	childProcess.exec('grunt '+tasks.join(' '), function(error, stdout, stderr) {
-		try {
-			// should we print the stdout?
-			if (!options.silently) {
-				// print stdout
-				console.log(stdout);
-				
-				// print stderr (if any)
-				if (stderr) {
-					console.log(stderr);
+	var params='';
+
+	function executeTasksWithParams() {
+		// execute tasks
+		childProcess.exec('grunt ' + tasks.join(' ') + params, function (error, stdout, stderr) {
+			try {
+				// should we print the stdout?
+				if (!options.silently) {
+					// print stdout
+					console.log(stdout);
+					// print stderr (if any)
+					if (stderr) {
+						console.log(stderr);
+					}
 				}
-			}
-			
-			// any error? write logs and return
-			if (stderr || error) {
-			    render(response, 500, gruntErrorTmpl, {
-			    	tasks: tasks,
-			    	stdout: formatStdout(stdout),
-			    	stderr: formatStdout(stderr)
-			    });
-				return;
-			}
-			
-		    // the the output stdout?
-		    if (output == 'stdout' || !output) {
-			    // write stdout
-		    	render(response, 200, successTmpl, {
-		    		output: formatStdout(stdout)
-		    	});
-			    
-		    } else {
-		    	// requested output file exists?
-				if (grunt.file.exists(output)) {
-					// write file
-		    		write(response, 200, grunt, output, contentType);
+				// any error? write logs and return
+				if (stderr || error) {
+					render(response, 500, gruntErrorTmpl, {
+						tasks: tasks,
+						stdout: formatStdout(stdout),
+						stderr: formatStdout(stderr)
+					});
+					return;
+				}
+				// the the output stdout?
+				if (output == 'stdout' || !output) {
+					// write stdout
+					render(response, 200, successTmpl, {
+						output: formatStdout(stdout)
+					});
 				} else {
-					// show file not found
-				    render(response, 500, missingTmpl, {
-				    	output: output
-				    });
+					// requested output file exists?
+					if (grunt.file.exists(output)) {
+						// write file
+						write(response, 200, grunt, output, contentType);
+					} else {
+						// show file not found
+						render(response, 500, missingTmpl, {
+							output: output
+						});
+					}
 				}
-		    }
-		} catch(e) {
-			// show error
-		    render(response, 500, errorTmpl, {
-		    	error: 'Unexpected JavaScript exception "'+e+'"<br />'+(e && e.stack ? e.stack.replace(/\n+/g, '<br />') : '')
-		    });
-		}
-	});
+			} catch (e) {
+				// show error
+				render(response, 500, errorTmpl, {
+					error: 'Unexpected JavaScript exception "' + e + '"<br />' + (e && e.stack ? e.stack.replace(/\n+/g, '<br />') : '')
+				});
+			}
+		});
+	}
+	if (request.method == 'POST') {
+		var body = '';
+		request.on('data', function (data) {
+			body += data;
+		});
+		request.on('end', function () {
+			try {
+				// Parse the JSON to validate that we are receiving proper JSON. Also prevents against hacking attempts.
+				var valid = JSON.parse(body);
+				// replace newlines, otherwise we start executing non grunt tasks
+				params = ' --jsonParameters \'' + body.replace('\n', ' ').replace('\'', '"') + '\'';
+				executeTasksWithParams();
+			} catch (e) {
+				// show error
+				render(response, 500, errorTmpl, {
+					error: 'Invalid JSON Provided:' + body
+				});
+			}
+		});
+	} else {
+		executeTasksWithParams();
+	}
 }
 
 /**
